@@ -27,6 +27,20 @@
 #define NGX_STREAM_TROJAN_RESOLV_CONF "/etc/resolv.conf"
 
 
+/*
+ * Angie 1.12.0 changed ngx_resolver_t.connections from an ngx_array_t to
+ * a linked-list head.  Keep the old check for Nginx and older Angie builds,
+ * while using the pointer check required by the new resolver API.
+ */
+#if defined(angie_version) && (angie_version >= 1012000)
+#define NGX_STREAM_TROJAN_RESOLVER_HAS_CONNECTIONS(r) \
+    ((r) != NULL && (r)->connections != NULL)
+#else
+#define NGX_STREAM_TROJAN_RESOLVER_HAS_CONNECTIONS(r) \
+    ((r) != NULL && (r)->connections.nelts != 0)
+#endif
+
+
 typedef enum {
     ngx_stream_trojan_outbound_direct = 0,
     ngx_stream_trojan_outbound_socks5
@@ -3405,14 +3419,15 @@ ngx_stream_trojan_route_resolver(ngx_stream_trojan_ctx_t *ctx)
     ngx_stream_core_srv_conf_t *cscf;
 
     cscf = ngx_stream_trojan_core_srv_conf(ctx);
-    if (cscf != NULL && cscf->resolver != NULL
-        && cscf->resolver->connections.nelts != 0)
+    if (cscf != NULL
+        && NGX_STREAM_TROJAN_RESOLVER_HAS_CONNECTIONS(cscf->resolver))
     {
         return cscf->resolver;
     }
 
-    if (ctx != NULL && ctx->conf != NULL && ctx->conf->route_resolver != NULL
-        && ctx->conf->route_resolver->connections.nelts != 0)
+    if (ctx != NULL && ctx->conf != NULL
+        && NGX_STREAM_TROJAN_RESOLVER_HAS_CONNECTIONS(
+               ctx->conf->route_resolver))
     {
         return ctx->conf->route_resolver;
     }
@@ -3464,8 +3479,8 @@ ngx_stream_trojan_create_internal_route_resolver(ngx_conf_t *cf,
     }
 
     cscf = tscf->core_srv_conf;
-    if (cscf != NULL && cscf->resolver != NULL
-        && cscf->resolver->connections.nelts != 0)
+    if (cscf != NULL
+        && NGX_STREAM_TROJAN_RESOLVER_HAS_CONNECTIONS(cscf->resolver))
     {
         return NGX_OK;
     }
