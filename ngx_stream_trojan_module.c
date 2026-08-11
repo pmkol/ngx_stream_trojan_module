@@ -380,6 +380,10 @@ static void ngx_stream_trojan_socks5_in_udp_read_handler(ngx_event_t *ev);
 static void ngx_stream_trojan_socks5_udp_control_handler(ngx_event_t *ev);
 static void ngx_stream_trojan_socks5_in_udp_control_handler(ngx_event_t *ev);
 static void ngx_stream_trojan_udp_client_write_handler(ngx_event_t *ev);
+static ngx_uint_t ngx_stream_trojan_client_buffered(
+    ngx_stream_trojan_ctx_t *ctx, ngx_connection_t *c);
+static ssize_t ngx_stream_trojan_recv(ngx_stream_trojan_ctx_t *ctx,
+    ngx_connection_t *c, u_char *buf, size_t size);
 static void ngx_stream_trojan_process_prefix(ngx_stream_trojan_ctx_t *ctx);
 static void ngx_stream_trojan_process_socks5_in(ngx_stream_trojan_ctx_t *ctx);
 static void ngx_stream_trojan_process_http_in(ngx_stream_trojan_ctx_t *ctx);
@@ -1371,7 +1375,7 @@ ngx_stream_trojan_http_in_read(ngx_stream_trojan_ctx_t *ctx)
     }
 
     available = b->end - b->last;
-    n = c->recv(c, b->last, available);
+    n = ngx_stream_trojan_recv(ctx, c, b->last, available);
 
     if (n == NGX_AGAIN) {
         if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
@@ -1462,7 +1466,7 @@ ngx_stream_trojan_socks5_in_read(ngx_stream_trojan_ctx_t *ctx, size_t needed)
 
     while ((size_t) (b->last - b->pos) < needed) {
         available = needed - (size_t) (b->last - b->pos);
-        n = c->recv(c, b->last, available);
+        n = ngx_stream_trojan_recv(ctx, c, b->last, available);
 
         if (n == NGX_AGAIN) {
             if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
@@ -1576,6 +1580,44 @@ ngx_stream_trojan_init_udp_buffers(ngx_stream_trojan_ctx_t *ctx)
 }
 
 
+static ngx_uint_t
+ngx_stream_trojan_client_buffered(ngx_stream_trojan_ctx_t *ctx,
+    ngx_connection_t *c)
+{
+    ngx_buf_t  *b;
+
+    if (c != ctx->session->connection) {
+        return 0;
+    }
+
+    b = c->buffer;
+
+    return b != NULL && b->pos < b->last;
+}
+
+
+static ssize_t
+ngx_stream_trojan_recv(ngx_stream_trojan_ctx_t *ctx, ngx_connection_t *c,
+    u_char *buf, size_t size)
+{
+    size_t      n;
+    ngx_buf_t  *b;
+
+    if (!ngx_stream_trojan_client_buffered(ctx, c)) {
+        return c->recv(c, buf, size);
+    }
+
+    /* SSL preread consumes decrypted data into the stream core buffer. */
+    b = c->buffer;
+    n = ngx_min(size, (size_t) (b->last - b->pos));
+
+    ngx_memcpy(buf, b->pos, n);
+    b->pos += n;
+
+    return (ssize_t) n;
+}
+
+
 static void
 ngx_stream_trojan_process_prefix(ngx_stream_trojan_ctx_t *ctx)
 {
@@ -1590,8 +1632,9 @@ ngx_stream_trojan_process_prefix(ngx_stream_trojan_ctx_t *ctx)
             break;
         }
 
-        n = c->recv(c, ctx->prefix + ctx->prefix_len,
-                    NGX_STREAM_TROJAN_PREFIX_LEN - ctx->prefix_len);
+        n = ngx_stream_trojan_recv(
+            ctx, c, ctx->prefix + ctx->prefix_len,
+            NGX_STREAM_TROJAN_PREFIX_LEN - ctx->prefix_len);
 
         if (n == NGX_AGAIN) {
             if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
@@ -1705,8 +1748,9 @@ ngx_stream_trojan_process_request(ngx_stream_trojan_ctx_t *ctx)
             return;
         }
 
-        n = c->recv(c, ctx->request + ctx->request_len,
-                    needed - ctx->request_len);
+        n = ngx_stream_trojan_recv(ctx, c,
+                                   ctx->request + ctx->request_len,
+                                   needed - ctx->request_len);
 
         if (n == NGX_AGAIN) {
             if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
@@ -4242,7 +4286,7 @@ ngx_stream_trojan_process_direction(ngx_stream_trojan_ctx_t *ctx,
 
         rev = src->read;
 
-        if (!rev->ready
+        if ((!rev->ready && !ngx_stream_trojan_client_buffered(ctx, src))
             || !ngx_stream_trojan_relay_should_continue(loops, bytes, limit))
         {
             return NGX_OK;
@@ -4254,7 +4298,7 @@ ngx_stream_trojan_process_direction(ngx_stream_trojan_ctx_t *ctx,
             return NGX_OK;
         }
 
-        n = src->recv(src, buf->last, available);
+        n = ngx_stream_trojan_recv(ctx, src, buf->last, available);
 
         if (n == NGX_AGAIN) {
             return NGX_OK;
@@ -4760,8 +4804,9 @@ ngx_stream_trojan_process_udp_client(ngx_stream_trojan_ctx_t *ctx)
             return;
         }
 
-        n = c->recv(c, ctx->udp_in + ctx->udp_in_len,
-                    NGX_STREAM_TROJAN_UDP_BUFFER_SIZE - ctx->udp_in_len);
+        n = ngx_stream_trojan_recv(
+            ctx, c, ctx->udp_in + ctx->udp_in_len,
+            NGX_STREAM_TROJAN_UDP_BUFFER_SIZE - ctx->udp_in_len);
 
         if (n == NGX_AGAIN) {
             if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
@@ -6756,7 +6801,7 @@ ngx_stream_trojan_socks5_in_udp_control_handler(ngx_event_t *ev)
     }
 
     for ( ;; ) {
-        n = c->recv(c, buf, sizeof(buf));
+        n = ngx_stream_trojan_recv(ctx, c, buf, sizeof(buf));
 
         if (n == NGX_AGAIN) {
             break;
