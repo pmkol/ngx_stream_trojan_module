@@ -13,6 +13,26 @@ static const uint8_t ngx_stream_trojan_503_response[] =
     "\r\n"
     "Service Unavailable";
 
+static const uint8_t ngx_stream_trojan_h2_503_response[] = {
+    /* Empty server SETTINGS. */
+    0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+    /* Stream 1 HEADERS with END_HEADERS. */
+    0x00, 0x00, 0x17, 0x01, 0x04, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x03, '5', '0', '3',
+    0x0f, 0x10, 0x0a, 't', 'e', 'x', 't', '/', 'p', 'l', 'a', 'i', 'n',
+    0x0f, 0x0d, 0x02, '1', '9',
+
+    /* Stream 1 DATA with END_STREAM. */
+    0x00, 0x00, 0x13, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    'S', 'e', 'r', 'v', 'i', 'c', 'e', ' ', 'U', 'n', 'a', 'v', 'a', 'i',
+    'l', 'a', 'b', 'l', 'e',
+
+    /* GOAWAY after stream 1 with NO_ERROR. */
+    0x00, 0x00, 0x08, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00
+};
+
 #define NGX_STREAM_TROJAN_SHA224_DIGEST_LEN 28
 #define NGX_STREAM_TROJAN_SHA256_BLOCK_LEN 64
 
@@ -524,4 +544,15 @@ ngx_stream_trojan_default_fallback_response(size_t *len)
     }
 
     return ngx_stream_trojan_503_response;
+}
+
+
+const uint8_t *
+ngx_stream_trojan_default_h2_fallback_response(size_t *len)
+{
+    if (len != NULL) {
+        *len = sizeof(ngx_stream_trojan_h2_503_response);
+    }
+
+    return ngx_stream_trojan_h2_503_response;
 }

@@ -1993,9 +1993,28 @@ ngx_stream_trojan_start_default_fallback(ngx_stream_trojan_ctx_t *ctx)
     size_t         len;
     const u_char  *response;
     ngx_connection_t *c;
+#if (NGX_STREAM_SSL)
+    ngx_str_t       alpn;
+#endif
 
     c = ctx->session->connection;
     response = ngx_stream_trojan_default_fallback_response(&len);
+
+#if (NGX_STREAM_SSL)
+    if (c->ssl != NULL) {
+        if (ngx_ssl_get_alpn_protocol(c, c->pool, &alpn) != NGX_OK) {
+            ngx_stream_trojan_finalize(ctx,
+                                       NGX_STREAM_INTERNAL_SERVER_ERROR);
+            return;
+        }
+
+        if (alpn.len == 2
+            && ngx_strncmp(alpn.data, (u_char *) "h2", 2) == 0)
+        {
+            response = ngx_stream_trojan_default_h2_fallback_response(&len);
+        }
+    }
+#endif
 
     ctx->pending_to_client = ngx_stream_trojan_create_temp_buf(c->pool, len);
     if (ctx->pending_to_client == NULL) {

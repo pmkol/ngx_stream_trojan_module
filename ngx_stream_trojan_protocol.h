@@ -45,5 +45,6 @@ int ngx_stream_trojan_pack_udp_frame(const ngx_stream_trojan_addr_t *addr, const
     uint16_t payload_len, uint8_t *out, size_t out_len, size_t *written);
 int ngx_stream_trojan_use_nginx_resolver(uint8_t addr_type, int resolver_configured);
 const uint8_t *ngx_stream_trojan_default_fallback_response(size_t *len);
+const uint8_t *ngx_stream_trojan_default_h2_fallback_response(size_t *len);
 
 #endif
